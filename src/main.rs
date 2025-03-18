@@ -4,11 +4,12 @@ use std::str;
 
 fn main() {
     let server = "127.0.0.1:8080";
-    let total_length = get_total_length_and_hash(server);
+    let total_length = get_total_length(server);
+
     println!("Total length of data: {}", total_length);
 }
 
-fn get_total_length_and_hash(server: &str) -> usize {
+fn get_total_length(server: &str) -> usize {
     let mut stream = TcpStream::connect(server).expect("Failed to connect to the server.");
     let request = format!("GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", server);
 
