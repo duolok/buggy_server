@@ -2,6 +2,9 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::str;
 use sha2::{Sha256, Digest};
+use std::error::Error;
+
+//type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 fn main() {
     let server = "127.0.0.1:8080";
@@ -48,19 +51,10 @@ fn main() {
     println!("SHA-256 hash of downloaded data: {}", hash);
 }
 
-fn get_total_length(server: &str) -> usize {
-    let mut stream = TcpStream::connect(server)
-        .expect("Failed to connect to the server.");
-    let request = format!(
-        "GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", 
-        server
-    );
-    stream.write_all(request.as_bytes())
-        .expect("Failed to send GET request.");
+fn get_total_length(server: &str) -> Result<usize> {
+    let request = format!("GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", server);
 
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response)
-        .expect("Failed to read response.");
+    let response = send_request(server, &request)?;
 
     // Find the end of headers (look for "\r\n\r\n")
     let headers_end = response
@@ -74,7 +68,15 @@ fn get_total_length(server: &str) -> usize {
     parse_content_length(headers_str).unwrap_or(0)
 }
 
-fn parse_content_length(headers: &str) -> Result<usize, &'static str> {
+fn send_request(server: &str, request: &str) -> Result<Vec<u8>> {
+    let mut stream = TcpStream::connect(server).expect("Failed to connect to the server.");
+    stream.write_all(request.as_bytes())?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response)?;
+    Ok(response)
+}
+
+fn parse_content_length(headers: &str) -> Result<usize> {
     for line in headers.lines() {
         if line.to_lowercase().starts_with("content-length:") {
             let parts: Vec<&str> = line.splitn(2, ':').collect();
