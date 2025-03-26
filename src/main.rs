@@ -1,12 +1,11 @@
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::error::Error;
 use std::str;
-use std::collections::HashMap;
-use sha2::{Sha256, Digest};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-
 
 fn main() -> Result<()> {
     let server = "127.0.0.1:8080";
@@ -25,7 +24,7 @@ fn main() -> Result<()> {
             start + chunk_size
         };
 
-        let chunk = download_chunk(server, start, end);
+        let chunk = download_chunk(server, start, end)?;
         let chunk_len = chunk.len();
         println!("Downloaded chunk: {} bytes (requested {}-{})\n", chunk_len, start, end);
 
@@ -38,20 +37,11 @@ fn main() -> Result<()> {
         start += chunk_len;
     }
 
-    if downloaded_data.len() != total_length {
-        println!(
-            "Warning: Downloaded data length ({}) does not match expected total length ({})",
-            downloaded_data.len(),
-            total_length
-        );
-    }
-
     let hash = calculate_hash(&downloaded_data);
     println!("SHA-256 hash of downloaded data: {}", hash);
 
     Ok(())
 }
-
 
 fn calculate_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -68,14 +58,13 @@ fn get_total_length(server: &str) -> Result<usize> {
     let (headers, _) = split_response(&response)?;
     let headers_map = parse_headers(headers)?;
 
-    headers_map
+    let content_length_str =headers_map
         .get("content-length")
-        .ok_or("Content-Length header not found".into())
-        .and_then(|value| {
-            value
-                .parse::<usize>()
-                .map_err(|e| format!("Failed to parse Content-Length: {}", e).into())
-        })
+        .ok_or("Content-Length header not found")?
+        .parse::<usize>()
+        .map_err(|e| format!("Failed to parse content-length: {}", e))?;
+
+    Ok(content_length_str)
 }
 
 fn send_request(server: &str, request: &str) -> Result<Vec<u8>> {
@@ -92,6 +81,7 @@ fn split_response(response: &[u8]) -> Result<(&str, Vec<u8>)> {
         .position(|window| window == b"\r\n\r\n")
         .ok_or("Failed to find end of headers")?
         + 4;
+
     let headers = str::from_utf8(&response[..header_end])?;
     let body = response[header_end..].to_vec();
     Ok((headers, body))
@@ -100,7 +90,7 @@ fn split_response(response: &[u8]) -> Result<(&str, Vec<u8>)> {
 fn parse_headers(response: &str) -> Result<HashMap<String, String>> {
     let mut headers = HashMap::new();
 
-    for line in response.lines().skip(1) {
+    for line in response.lines() {
         if line.trim().is_empty() {
             break;
         }
@@ -111,67 +101,40 @@ fn parse_headers(response: &str) -> Result<HashMap<String, String>> {
     Ok(headers)
 }
 
-fn download_chunk(server: &str, start: usize, end: usize) -> Vec<u8> {
-    let mut stream = TcpStream::connect(server).expect("Failed to connect to the server.");
-
+fn download_chunk(server: &str, start: usize, end: usize) -> Result<Vec<u8>> {
     let range_header = format!("Range: bytes={}-{}\r\n", start, end);
     let request = format!(
         "GET / HTTP/1.1\r\nHost: {}\r\n{}\r\nConnection: close\r\n\r\n",
         server, range_header
     );
 
-    stream.write_all(request.as_bytes()).expect("Failed to send GET request");
-    
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).expect("Failed to read response");
+    let response = send_request(server, &request)?;
+    let (headers, body) = split_response(&response)?;
 
-    // find end of headers
-    let headers_end = match response.windows(4).position(|window| window == b"\r\n\r\n") {
-        Some(pos) => pos + 4,
-        None => {
-            eprintln!("End of headers not found");
-            return Vec::new();
-        }
-    };
+    let headers_map = parse_headers(headers)?;
+    let status_code = parse_status_code(headers)?;
 
-
-    let headers = &response[..headers_end];
-    let headers_str = match str::from_utf8(headers) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!("Invalid UTF-8 in headers");
-            return Vec::new();
-        }
-    };
-    println!("{:?}", &headers_str);
-
-    // parse status code
-    let status_line = headers_str.lines().next().unwrap_or("");
-    let status_code = status_line.split_whitespace().nth(1).unwrap_or("0");
-    let status_code: u16 = status_code.parse().unwrap_or(0);
-
-    if !(status_code == 200 || status_code == 206) {
-        eprintln!("Unexpected status code: {}", status_code);
-        return Vec::new();
+    if !status_code != 200 && status_code != 206 {
+        return Err(format!("Unexpected status code: {}", status_code).into());
     }
 
-    // parse Content-Length from the response header
-    let content_length = match parse_content_length(headers_str) {
-        Ok(len) => len,
-        Err(e) => {
-            eprintln!("{}", e);
-            return Vec::new();
-        }
-    };
+    let expected_length = headers_map
+        .get("content-length")
+        .ok_or("Content-Length header not found")?
+        .parse::<usize>()
+        .map_err(|e| format!("Failed to parse content-length: {}", e))?;
 
-    let body_start = headers_end;
-    let mut body_end = body_start + content_length;
+    Ok(body.into_iter().take(expected_length).collect())
+}
 
+fn parse_status_code(response: &str) -> Result<u16> {
+    let status_line = response.lines().next().ok_or("Empty response.")?;
+    let parts: Vec<&str> = status_line.split_whitespace().collect();
 
-    println!("body start: {} , content_length: {}, response len: {}", &body_start, &content_length, &response.len());
-    if body_start + content_length > response.len() {
-        body_end = response.len() - body_start;
+    if parts.len() != 4 {
+        return Err("Invalid status line.".into());
     }
 
-    response[body_start..body_end].to_vec()
+    let code = parts[1].parse::<u16>()?;
+    Ok(code)
 }
