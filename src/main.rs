@@ -10,7 +10,7 @@ fn main() {
 
     // pre-allocate the vector with expected capacity
     let mut downloaded_data = Vec::with_capacity(total_length);
-    let chunk_size = 512 * 1024;
+    let chunk_size = 64 * 1024;
     let mut start = 0;
 
     while start < total_length {
@@ -93,8 +93,7 @@ fn parse_content_length(headers: &str) -> Result<usize, &'static str> {
 fn download_chunk(server: &str, start: usize, end: usize) -> Vec<u8> {
     let mut stream = TcpStream::connect(server).expect("Failed to connect to the server.");
 
-    // http range header: note that the range is inclusive, so we subtract 1 from `end`
-    let range_header = format!("Range: bytes={}-{}\r\n", start, end.saturating_sub(1));
+    let range_header = format!("Range: bytes={}-{}\r\n", start, end);
     let request = format!(
         "GET / HTTP/1.1\r\nHost: {}\r\n{}\r\nConnection: close\r\n\r\n",
         server, range_header
@@ -114,6 +113,7 @@ fn download_chunk(server: &str, start: usize, end: usize) -> Vec<u8> {
         }
     };
 
+
     let headers = &response[..headers_end];
     let headers_str = match str::from_utf8(headers) {
         Ok(s) => s,
@@ -122,6 +122,7 @@ fn download_chunk(server: &str, start: usize, end: usize) -> Vec<u8> {
             return Vec::new();
         }
     };
+    println!("{:?}", &headers_str);
 
     // parse status code
     let status_line = headers_str.lines().next().unwrap_or("");
@@ -153,4 +154,3 @@ fn download_chunk(server: &str, start: usize, end: usize) -> Vec<u8> {
 
     response[body_start..body_end].to_vec()
 }
-
