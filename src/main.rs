@@ -1,20 +1,21 @@
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::error::Error;
-use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::io::{Read, Write};
+use std::error::Error;
+use std::collections::HashMap;
 use std::str;
+use sha2::{Digest, Sha256};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const CHUNK_SIZE: usize = 64 * 1024;
+const CHUNK_SIZE: usize = 32 * 1024;
+const SERVER: &str = "127.0.0.1:8080";
 
 fn main() -> Result<()> {
-    let server = "127.0.0.1:8080";
-    let total_length = get_total_length(server)?;
-    println!("Total length of data: {} \n\n", total_length);
+    let total_length = get_total_length(SERVER)?;
+    println!("Total length of data: {} \n", total_length);
 
-    // pre-allocate the vector with expected capacity
+    // pre-allocate the vector with expected capacity 
+    // it works with Vector::new as well but used with capacity to ensure predetermined size
     let mut downloaded_data = Vec::with_capacity(total_length);
     let mut start = 0;
 
@@ -24,16 +25,16 @@ fn main() -> Result<()> {
             end = total_length;
         }
 
-        let chunk = download_chunk(server, start, end)?;
+        let chunk = download_chunk(SERVER, start, end)?;
         let chunk_len = chunk.len();
-        println!("Downloaded chunk: {} bytes (requested {}-{})\n", chunk_len, start, end);
+        println!("Downloaded chunk: {} bytes (requested {}-{})", chunk_len, start, end);
 
         downloaded_data.extend_from_slice(&chunk);
         start += chunk_len;
     }
 
     let hash = calculate_hash(&downloaded_data);
-    println!("SHA-256 hash of downloaded data: {}", hash);
+    println!("\nSHA-256 hash of downloaded data: {}", hash);
 
     Ok(())
 }
@@ -49,6 +50,7 @@ fn get_total_length(server: &str) -> Result<usize> {
         "GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
         server
     );
+
     let response = send_request(server, &request)?;
     let (headers, _) = split_response(&response)?;
     let headers_map = parse_headers(headers)?;
@@ -73,7 +75,6 @@ fn download_chunk(server: &str, start: usize, end: usize) -> Result<Vec<u8>> {
     let (headers, body) = split_response(&response)?;
 
     let headers_map = parse_headers(headers)?;
-    println!("{:?}", &headers_map);
     let status_code = parse_status_code(headers)?;
 
     if !status_code != 200 && status_code != 206 {
@@ -131,7 +132,6 @@ fn parse_status_code(response: &str) -> Result<u16> {
     let status_line = response.lines().next().ok_or("Empty response.")?;
     let parts: Vec<&str> = status_line.split_whitespace().collect();
 
-    println!("{:?}", &parts);
     if parts.len() != 4 {
         return Err("Invalid status line.".into());
     }
