@@ -3,34 +3,57 @@ use std::io::{Read, Write};
 use std::error::Error;
 use std::collections::HashMap;
 use std::str;
+use std::thread;
 use sha2::{Digest, Sha256};
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 const CHUNK_SIZE: usize = 32 * 1024;
+const THREAD_NUM: usize = 8;
 const SERVER: &str = "127.0.0.1:8080";
 
 fn main() -> Result<()> {
     let total_length = get_total_length(SERVER)?;
     println!("Total length of data: {} \n", total_length);
 
-    // pre-allocate the vector with expected capacity 
-    // it works with Vector::new as well but used with capacity to ensure predetermined size
-    let mut downloaded_data = Vec::with_capacity(total_length);
-    let mut start = 0;
+    let part_size = total_length / THREAD_NUM;
 
-    while start < total_length {
-        let mut end = start + CHUNK_SIZE;
-        if end > total_length {
+    let mut handles = Vec::with_capacity(THREAD_NUM);
+    for i in 0..THREAD_NUM {
+        let start = i * part_size;
+        let mut end = start + part_size;
+        if i == THREAD_NUM - 1 {
             end = total_length;
         }
 
-        let chunk = download_chunk(SERVER, start, end)?;
-        let chunk_len = chunk.len();
-        println!("Downloaded chunk: {} bytes (requested {}-{})", chunk_len, start, end);
+        let handle = thread::spawn(move || -> Result<Vec<u8>> {
+            let mut part_data = Vec::with_capacity(end - start);
+            let mut pos = start;
 
-        downloaded_data.extend_from_slice(&chunk);
-        start += chunk_len;
+            while pos < end {
+                let next_end = (pos + CHUNK_SIZE).min(end);
+                let chunk = download_chunk(SERVER, pos, next_end)?;
+                let chunk_len = chunk.len();
+
+                println!(
+                    "Thread {} downloaded chunk: {} bytes (requested {}-{})",
+                    i, chunk_len, pos, next_end
+                );
+
+                part_data.extend_from_slice(&chunk);
+                pos += chunk_len;
+            }
+            Ok(part_data)
+
+        });
+
+        handles.push(handle);
+    }
+
+    let mut downloaded_data = Vec::with_capacity(total_length);
+    for handle in handles {
+        let part = handle.join().map_err(|_| "Thread panicked")??;
+        downloaded_data.extend(part);
     }
 
     let hash = calculate_hash(&downloaded_data);
@@ -38,6 +61,7 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
 
 fn calculate_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
