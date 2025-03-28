@@ -1,9 +1,9 @@
-use std::net::TcpStream;
-use std::io::{Read, Write};
-use std::error::Error;
-use std::collections::HashMap;
-use std::str;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::error::Error;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::str;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -14,7 +14,7 @@ fn main() -> Result<()> {
     let total_length = get_total_length(SERVER)?;
     println!("Total length of data: {} \n", total_length);
 
-    // pre-allocate the vector with expected capacity 
+    // pre-allocate the vector with expected capacity
     // it works with Vector::new as well but used with capacity to ensure predetermined size
     let mut downloaded_data = Vec::with_capacity(total_length);
     let mut start = 0;
@@ -27,7 +27,10 @@ fn main() -> Result<()> {
 
         let chunk = download_chunk(SERVER, start, end)?;
         let chunk_len = chunk.len();
-        println!("Downloaded chunk: {} bytes (requested {}-{})", chunk_len, start, end);
+        println!(
+            "Downloaded chunk: {} bytes (requested {}-{})",
+            chunk_len, start, end
+        );
 
         downloaded_data.extend_from_slice(&chunk);
         start += chunk_len;
@@ -41,7 +44,7 @@ fn main() -> Result<()> {
 
 fn calculate_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(&data);
+    hasher.update(data);
     format!("{:x}", hasher.finalize())
 }
 
@@ -55,7 +58,7 @@ fn get_total_length(server: &str) -> Result<usize> {
     let (headers, _) = split_response(&response)?;
     let headers_map = parse_headers(headers)?;
 
-    let content_length_str =headers_map
+    let content_length_str = headers_map
         .get("content-length")
         .ok_or("Content-Length header not found")?
         .parse::<usize>()
@@ -127,7 +130,6 @@ fn parse_headers(response: &str) -> Result<HashMap<String, String>> {
     Ok(headers)
 }
 
-
 fn parse_status_code(response: &str) -> Result<u16> {
     let status_line = response.lines().next().ok_or("Empty response.")?;
     let parts: Vec<&str> = status_line.split_whitespace().collect();
@@ -139,8 +141,6 @@ fn parse_status_code(response: &str) -> Result<u16> {
     let code = parts[1].parse::<u16>()?;
     Ok(code)
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -184,7 +184,6 @@ mod tests {
         assert_ne!(code, 200);
     }
 
-
     #[test]
     fn test_split_response() {
         let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello";
@@ -200,7 +199,10 @@ mod tests {
         let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5";
         let result = split_response(response);
 
-        assert!(result.is_err(), "Should fail if no \\r\\n\\r\\n separator is found");
+        assert!(
+            result.is_err(),
+            "Should fail if no \\r\\n\\r\\n separator is found"
+        );
     }
 
     #[test]
